@@ -1,0 +1,71 @@
+name: xianyu-manager
+
+services:
+  xianyu-app:
+    profiles: ["live"]
+    build:
+      context: .
+      dockerfile: deploy/server.Dockerfile
+    image: xianyu-manager:server
+    restart: unless-stopped
+    init: true
+    user: "0:0"
+    ports:
+      - "127.0.0.1:${XIAN_YU_WEB_PORT:-18080}:8080"
+    volumes:
+      - "${XIAN_YU_STATE_DIR:?Set XIAN_YU_STATE_DIR}/data:/app/data:rw"
+      - "${XIAN_YU_STATE_DIR:?Set XIAN_YU_STATE_DIR}/logs:/app/logs:rw"
+      - "${XIAN_YU_STATE_DIR:?Set XIAN_YU_STATE_DIR}/backups:/app/backups:rw"
+      - "${XIAN_YU_STATE_DIR:?Set XIAN_YU_STATE_DIR}/uploads:/app/static/uploads:rw"
+      - ./global_config.yml:/app/global_config.yml:ro
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      TZ: Asia/Shanghai
+      DB_PATH: /app/data/xianyu_data.db
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:?Set a non-default ADMIN_PASSWORD in the private env file}"
+      USER_REGISTRATION_ENABLED: "false"
+      AUTO_REPLY_ENABLED: "true"
+      AUTO_DELIVERY_ENABLED: "true"
+      API_CARD_TIMEOUT: "10"
+    networks:
+      - robot
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    mem_limit: 2300m
+    shm_size: 512m
+
+  delivery-gateway:
+    profiles: ["live"]
+    image: "${XIAN_YU_CADDY_IMAGE:-public.ecr.aws/docker/library/caddy:2.9-alpine}"
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop:
+      - ALL
+    # The official Caddy binary carries this file capability; it must remain in
+    # the bounding set even though this gateway listens on unprivileged 8081.
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./deploy/server-delivery.Caddyfile:/etc/caddy/Caddyfile:ro
+    tmpfs:
+      - /data:uid=1000,gid=1000,mode=0700
+      - /config:uid=1000,gid=1000,mode=0700
+      - /tmp:uid=1000,gid=1000,mode=0700
+    networks:
+      - robot
+      - account-backend
+
+networks:
+  robot:
+    driver: bridge
+  account-backend:
+    external: true
+    name: account-distribution_default
